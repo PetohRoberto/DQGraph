@@ -404,28 +404,28 @@ def _prepare_X_y(df: pd.DataFrame, target_prop: str, task_type: str):
     task_type: 'classification' | 'regression'
     """
     if target_prop not in df.columns:
-        raise ValueError(f"Propriété cible '{target_prop}' absente des données.")
+        raise ValueError(f"Target property '{target_prop}' not found in data.")
 
     df = df.copy().dropna(subset=[target_prop])
     if len(df) < 10:
-        raise ValueError(f"Trop peu d'échantillons avec la cible : {len(df)}.")
+        raise ValueError(f"Too few samples with the target property: {len(df)}.")
 
     if task_type == "classification":
         le = LabelEncoder()
         y  = le.fit_transform(df[target_prop].astype(str))
         if len(np.unique(y)) < 2:
-            raise ValueError("La cible n'a qu'une seule classe.")
+            raise ValueError("Target has only one class.")
     else:
         df = df.copy()
         df["__y__"] = pd.to_numeric(df[target_prop], errors="coerce")
         df = df.dropna(subset=["__y__"])
         if len(df) < 10:
-            raise ValueError("Pas assez de valeurs numériques pour la cible.")
+            raise ValueError("Not enough numeric values for the target property.")
         y = df["__y__"].values
 
     feat_cols = _numeric_cols(df, exclude=[target_prop, "__y__"])
     if not feat_cols:
-        raise ValueError("Aucune feature numérique disponible.")
+        raise ValueError("No numeric features available.")
 
     X = df[feat_cols].apply(pd.to_numeric, errors="coerce").fillna(df[feat_cols].median())
     return X.values, y, feat_cols
@@ -522,7 +522,7 @@ class SklearnGraphML:
     ) -> dict[str, float]:
         all_pos_pairs = _fetch_edges(self.driver, self.db, src_label, rel_type, dst_label)
         if len(all_pos_pairs) < 10:
-            raise ValueError(f"Pas assez d'arcs positifs : {len(all_pos_pairs)}.")
+            raise ValueError(f"Not enough positive edges: {len(all_pos_pairs)}.")
 
         # ── 1. Split edges FIRST — prevents leakage into features ─────────────
         # node2vec, degrees and neighbor stats are computed on train edges only,
@@ -608,7 +608,7 @@ class SklearnGraphML:
         test_neg  = _sample_neg(len(test_pos))
 
         if len(train_neg) < 5 or len(test_neg) < 2:
-            raise ValueError("Impossible d'échantillonner assez de paires négatives.")
+            raise ValueError("Could not sample enough negative pairs.")
 
         # ── 6. Build feature vectors ───────────────────────────────────────────
         def _make_Xy(pairs: list[tuple], label: int) -> tuple[list, list]:
@@ -631,7 +631,7 @@ class SklearnGraphML:
             X_te_l.extend(xb); y_te_l.extend(yb)
 
         if len(X_tr_l) < 10 or len(X_te_l) < 4:
-            raise ValueError("Pas assez de paires valides pour l'entraînement.")
+            raise ValueError("Not enough valid pairs for training.")
 
         X_tr, y_tr = np.array(X_tr_l), np.array(y_tr_l)
         X_te, y_te = np.array(X_te_l), np.array(y_te_l)
@@ -662,4 +662,4 @@ class SklearnGraphML:
             return self.run_node_regression(src_label, rel_type, target_prop, algo_name)
         if task_id == "link_prediction":
             return self.run_link_prediction(src_label, rel_type, dst_label, algo_name)
-        raise ValueError(f"Tâche inconnue : {task_id}")
+        raise ValueError(f"Unknown task: {task_id}")

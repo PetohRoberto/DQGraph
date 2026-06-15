@@ -249,22 +249,22 @@ if st.session_state.project is None:
     _, col, _ = st.columns([1, 2.4, 1])
     with col:
         st.markdown('<div class="login-logo">⬡ DQGraph</div>', unsafe_allow_html=True)
-        st.markdown('<div class="login-sub">Sélectionner ou créer un projet</div>',
+        st.markdown('<div class="login-sub">Select or create a project</div>',
                     unsafe_allow_html=True)
 
         existing = Project.list_all()
 
-        tab_new, tab_open = st.tabs(["  Nouveau projet  ", "  Ouvrir un projet  "])
+        tab_new, tab_open = st.tabs(["  New project  ", "  Open project  "])
 
         with tab_new:
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-            proj_name = st.text_input("Nom du projet", placeholder="Mon projet de thèse",
+            proj_name = st.text_input("Project name", placeholder="My thesis project",
                                       key="new_proj_name")
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-            if st.button("Créer le projet  →", width="stretch", type="primary",
+            if st.button("Create project  →", width="stretch", type="primary",
                          key="btn_create"):
                 if not proj_name.strip():
-                    st.error("Entrez un nom de projet.")
+                    st.error("Please enter a project name.")
                 else:
                     p = Project(proj_name.strip(),
                                 st.session_state.uri,
@@ -278,7 +278,7 @@ if st.session_state.project is None:
                 st.markdown(
                     "<div style='padding:24px 0;font-family:DM Mono,monospace;"
                     "font-size:.78rem;color:#5a6480;text-align:center'>"
-                    "Aucun projet existant.</div>",
+                    "No existing projects.</div>",
                     unsafe_allow_html=True,
                 )
             else:
@@ -292,14 +292,14 @@ if st.session_state.project is None:
                             f'<div class="proj-card">'
                             f'<div class="proj-card-name">{p_info["name"]}</div>'
                             f'<div class="proj-card-meta">'
-                            f'Créé le {created} &nbsp;·&nbsp; '
-                            f'{n_q} métrique{"s" if n_q != 1 else ""} calculée{"s" if n_q != 1 else ""}'
+                            f'Created on {created} &nbsp;·&nbsp; '
+                            f'{n_q} metric{"s" if n_q != 1 else ""} computed'
                             f'</div></div>',
                             unsafe_allow_html=True,
                         )
                     with col_btn:
                         st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-                        if st.button("Ouvrir", key=f"open_{p_info['path']}", width="stretch"):
+                        if st.button("Open", key=f"open_{p_info['path']}", width="stretch"):
                             p = Project.load(p_info["path"])
                             st.session_state.project = p
                             st.rerun()
@@ -314,7 +314,7 @@ if st.session_state.project is None:
         )
 
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        if st.button("← Déconnexion", key="disc_proj"):
+        if st.button("← Disconnect", key="disc_proj"):
             for k in list(st.session_state.keys()):
                 del st.session_state[k]
             st.rerun()
@@ -333,14 +333,14 @@ with h2:
 with h3:
     st.markdown(f'<div class="proj-badge">◈ {proj.name}</div>', unsafe_allow_html=True)
 with h5:
-    if st.button("Projets", key="back_proj", width="stretch"):
+    if st.button("Projects", key="back_proj", width="stretch"):
         st.session_state.project = None
         # Clear quality/ML session state
         for k in ["q_results", "ml_results"]:
             st.session_state.pop(k, None)
         st.rerun()
 with h6:
-    if st.button("Déconnexion", key="disconnect", width="stretch"):
+    if st.button("Disconnect", key="disconnect", width="stretch"):
         for k in list(st.session_state.keys()):
             del st.session_state[k]
         st.rerun()

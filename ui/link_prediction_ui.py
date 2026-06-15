@@ -8,7 +8,7 @@ S'appuie sur link_prediction.LinkPredictionPipeline (GDS).
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from link_prediction import LinkPredictionPipeline
+from ml.link_prediction import LinkPredictionPipeline
 from ui.schema import SchemaExplorer
 
 
@@ -51,8 +51,8 @@ EMBEDDING_FEATURES = {
     "Hadamard": "HADAMARD"
 }
 ALGORITHMS = {
-    "Régression logistique": "logistic_regression",
-    "Random Forest":         "random_forest",
+    "Logistic Regression": "logistic_regression",
+    "Random Forest":       "random_forest",
 }
 
 
@@ -77,7 +77,7 @@ class ProgressLog:
 # ── résultats ─────────────────────────────────────────────────────────────────
 
 def _render_model_metrics(model_info: dict, model_selection: dict, elapsed: float):
-    st.markdown('<div class="section-title">📊 Performance du modèle</div>',
+    st.markdown('<div class="section-title">📊 Model Performance</div>',
                 unsafe_allow_html=True)
 
     best = model_info.get("bestParameters", {})
@@ -100,7 +100,7 @@ def _render_model_metrics(model_info: dict, model_selection: dict, elapsed: floa
         st.markdown(f"""
         <div class="score-card">
             <div class="score-value" style="color:#a89cf7;font-size:2.2rem">{elapsed}s</div>
-            <div class="score-label">Temps d'entraînement</div>
+            <div class="score-label">Training time</div>
         </div>""", unsafe_allow_html=True)
 
     with cols[2]:
@@ -109,32 +109,29 @@ def _render_model_metrics(model_info: dict, model_selection: dict, elapsed: floa
         st.markdown(f"""
         <div class="score-card">
             <div class="score-value" style="color:#5ce8b0;font-size:2.2rem">{n_candidates}</div>
-            <div class="score-label">Candidats évalués</div>
+            <div class="score-label">Candidates evaluated</div>
         </div>""", unsafe_allow_html=True)
 
-    # Détail métriques bruts
-    with st.expander("Détail model_info (JSON)", expanded=False):
+    with st.expander("Model info details (JSON)", expanded=False):
         st.json(model_info)
 
 
 def _render_predictions(predictions: list[dict], rel_type: str):
     if not predictions:
-        st.warning("Aucun lien prédit au-dessus du seuil.")
+        st.warning("No predicted links above the threshold.")
         return
 
     st.markdown(
-        f'<div class="section-title">🔮 Liens prédits — {rel_type} '
-        f'({len(predictions)} résultats)</div>',
+        f'<div class="section-title">🔮 Predicted links — {rel_type} '
+        f'({len(predictions)} results)</div>',
         unsafe_allow_html=True,
     )
 
-    # Tableau
     rows = []
     for p in predictions:
         def _repr(node: dict) -> str:
             if not node:
                 return "?"
-            # Essaie de trouver une propriété lisible
             for key in ("name", "title", "id", "label"):
                 if key in node:
                     return str(node[key])
@@ -142,31 +139,30 @@ def _render_predictions(predictions: list[dict], rel_type: str):
             return str(vals[0]) if vals else "?"
 
         rows.append({
-            "Nœud 1":      _repr(p["node1"]),
-            "Nœud 2":      _repr(p["node2"]),
-            "Probabilité": p["probability"],
-            "Confiance":   "🟢 Haute" if p["probability"] >= 0.7
-                           else ("🟡 Moyenne" if p["probability"] >= 0.5 else "🔴 Faible"),
+            "Node 1":      _repr(p["node1"]),
+            "Node 2":      _repr(p["node2"]),
+            "Probability": p["probability"],
+            "Confidence":  "🟢 High" if p["probability"] >= 0.7
+                           else ("🟡 Medium" if p["probability"] >= 0.5 else "🔴 Low"),
         })
 
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
 
-    # Bar chart des probabilités
     fig = go.Figure(go.Bar(
-        x=[f"{r['Nœud 1']} → {r['Nœud 2']}" for r in rows],
-        y=[r["Probabilité"] for r in rows],
+        x=[f"{r['Node 1']} → {r['Node 2']}" for r in rows],
+        y=[r["Probability"] for r in rows],
         marker_color=[
-            "#5ce8b0" if r["Probabilité"] >= 0.7
-            else ("#f7ae6a" if r["Probabilité"] >= 0.5 else "#f76a7c")
+            "#5ce8b0" if r["Probability"] >= 0.7
+            else ("#f7ae6a" if r["Probability"] >= 0.5 else "#f76a7c")
             for r in rows
         ],
-        text=[f"{r['Probabilité']:.3f}" for r in rows],
+        text=[f"{r['Probability']:.3f}" for r in rows],
         textposition="outside",
         textfont={"family": "Space Mono", "size": 10, "color": "#e2e2f0"},
     ))
     fig.update_layout(
-        title={"text": "Score de probabilité par paire",
+        title={"text": "Probability score per pair",
                "font": {"family": "Syne", "size": 13, "color": "#8888aa"}},
         height=340,
         margin=dict(l=10, r=10, t=50, b=80),
@@ -191,19 +187,18 @@ def render_link_prediction_tab(uri: str, user: str, password: str, database: str
 
     st.markdown("""
     <div class="info-box">
-        🔗 <strong>Link Prediction</strong> — Prédit les liens manquants dans le graphe
-        via le pipeline GDS. Sélectionnez le type de relation cible, les features
-        heuristiques et l'algorithme ML.
+        🔗 <strong>Link Prediction</strong> — Predicts missing links in the graph
+        via the GDS pipeline. Select the target relationship type, heuristic features,
+        and the ML algorithm.
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Vérification GDS ─────────────────────────────────────────────────────
     lp = LinkPredictionPipeline(uri, user, password, database)
     if not lp.check_gds_available():
         lp.close()
         st.error(
-            "❌ **Neo4j Graph Data Science (GDS)** n'est pas disponible sur cette instance.\n\n"
-            "Installez le plugin GDS depuis [neo4j.com/docs/graph-data-science](https://neo4j.com/docs/graph-data-science/)."
+            "❌ **Neo4j Graph Data Science (GDS)** is not available on this instance.\n\n"
+            "Install the GDS plugin from [neo4j.com/docs/graph-data-science](https://neo4j.com/docs/graph-data-science/)."
         )
         return
     lp.close()
@@ -212,23 +207,23 @@ def render_link_prediction_tab(uri: str, user: str, password: str, database: str
 
     with col_form:
         st.markdown('<div class="conn-panel">', unsafe_allow_html=True)
-        st.markdown("#### 🎯 Relation cible")
+        st.markdown("#### 🎯 Target relationship")
 
         rel_types = _rel_types(uri, user, password, database)
-        rel_type = st.selectbox("Type de relation à prédire", rel_types, key="lp_rel") \
-                   if rel_types else st.text_input("Type de relation", key="lp_rel")
+        rel_type = st.selectbox("Relationship type to predict", rel_types, key="lp_rel") \
+                   if rel_types else st.text_input("Relationship type", key="lp_rel")
 
         src_labels, dst_labels = _rel_node_labels(uri, user, password, rel_type, database) \
                                   if rel_type else ([], [])
 
-        src_label = st.selectbox("Nœud source", src_labels, key="lp_src") \
-                    if src_labels else st.text_input("Nœud source", key="lp_src")
-        dst_label = st.selectbox("Nœud destination", dst_labels, key="lp_dst") \
-                    if dst_labels else st.text_input("Nœud destination", key="lp_dst")
+        src_label = st.selectbox("Source node", src_labels, key="lp_src") \
+                    if src_labels else st.text_input("Source node", key="lp_src")
+        dst_label = st.selectbox("Destination node", dst_labels, key="lp_dst") \
+                    if dst_labels else st.text_input("Destination node", key="lp_dst")
 
         st.markdown("#### 🔬 Heuristic Features")
         selected_feats = st.multiselect(
-            "Features heuristiques",
+            "Heuristic features",
             list(FEATURES.keys()),
             default=["Common Neighbors", "Adamic-Adar", "Preferential Attachment"],
             key="lp_features",
@@ -236,14 +231,14 @@ def render_link_prediction_tab(uri: str, user: str, password: str, database: str
         
         st.markdown("#### 🔬 Embedded Features")
         selected_embedded_feats = st.multiselect(
-            "Features d'embedding",
+            "Embedding features",
             list(EMBEDDING_FEATURES.keys()),
             default=["Hadamard"],
             key="lp_embedded_features",
         )
 
-        st.markdown("#### 🤖 Algorithme")
-        algo_label = st.selectbox("Modèle ML", list(ALGORITHMS.keys()), key="lp_algo")
+        st.markdown("#### 🤖 Algorithm")
+        algo_label = st.selectbox("ML model", list(ALGORITHMS.keys()), key="lp_algo")
 
         st.markdown("#### ⚙️ Paramètres")
         c1, c2 = st.columns(2)
@@ -252,17 +247,17 @@ def render_link_prediction_tab(uri: str, user: str, password: str, database: str
         with c2:
             train_frac = st.slider("Train fraction", 0.4, 0.8, 0.6, 0.05, key="lp_train")
 
-        top_n = st.number_input("Top N prédictions", 5, 100, 20, key="lp_topn")
-        threshold = st.slider("Seuil de probabilité", 0.0, 1.0, 0.3, 0.05, key="lp_thresh")
+        top_n = st.number_input("Top N predictions", 5, 100, 20, key="lp_topn")
+        threshold = st.slider("Probability threshold", 0.0, 1.0, 0.3, 0.05, key="lp_thresh")
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-        run_btn = st.button("▶ Lancer le pipeline", use_container_width=True, key="lp_run")
+        run_btn = st.button("▶ Run pipeline", use_container_width=True, key="lp_run")
 
     with col_result:
         if run_btn:
             if not (selected_feats or selected_embedded_feats):
-                st.warning("Sélectionnez au moins une feature.")
+                st.warning("Select at least one feature.")
             else:
                 log_container = st.empty()
                 progress = ProgressLog(log_container)
@@ -288,15 +283,14 @@ def render_link_prediction_tab(uri: str, user: str, password: str, database: str
                 log_container.empty()
 
                 if not result["success"]:
-                    st.error(f"❌ Erreur GDS : {result['error']}")
+                    st.error(f"❌ GDS error: {result['error']}")
                 else:
-                    # Stat graphe projeté
                     gs = result.get("graph_stats", {})
                     st.markdown(f"""
                     <div class="info-box">
-                        Graphe projeté : <strong>{gs.get('nodeCount', '?')}</strong> nœuds ·
-                        <strong>{gs.get('relationshipCount', '?')}</strong> relations ·
-                        Pipeline terminé en <strong>{result['elapsed']}s</strong>
+                        Projected graph: <strong>{gs.get('nodeCount', '?')}</strong> nodes ·
+                        <strong>{gs.get('relationshipCount', '?')}</strong> relationships ·
+                        Pipeline completed in <strong>{result['elapsed']}s</strong>
                     </div>""", unsafe_allow_html=True)
 
                     _render_model_metrics(
@@ -310,7 +304,7 @@ def render_link_prediction_tab(uri: str, user: str, password: str, database: str
             st.markdown("""
             <div class="info-box" style="margin-top:2rem;text-align:center;padding:40px 20px">
                 <div style="font-size:2rem;margin-bottom:12px;opacity:0.4">⬡</div>
-                Configurez le pipeline à gauche, puis cliquez sur
-                <strong>▶ Lancer le pipeline</strong>.
+                Configure the pipeline on the left, then click
+                <strong>▶ Run pipeline</strong>.
             </div>
             """, unsafe_allow_html=True)

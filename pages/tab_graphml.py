@@ -19,7 +19,7 @@ from neo4j import GraphDatabase
 
 from ui.schema import SchemaExplorer
 from degraders import DataCompletenessDegrader
-from ml_sklearn import (
+from ml.ml_sklearn import (
     SklearnGraphML, ALGORITHMS, TASK_METRICS, TASK_LABELS, LAMBDA_RANGE,
     ALGO_CLASSIFIERS, ALGO_REGRESSORS, ALGO_LP,
 )
@@ -151,11 +151,11 @@ def _make_multi_algo_chart(
 
     fig.update_layout(
         title={
-            "text": f"{task_name} — {metric_name} vs Dégradation ({degrad_dim})",
+            "text": f"{task_name} — {metric_name} vs Degradation ({degrad_dim})",
             "font": {"family": "Syne", "size": 13, "color": "#e8eaf0"},
         },
         xaxis={
-            "title": {"text": "Dégradation λ",
+            "title": {"text": "Degradation λ",
                       "font": {"family": "DM Mono", "size": 11, "color": "#5a6480"}},
             "tickfont": {"family": "DM Mono", "size": 10, "color": "#5a6480"},
             "gridcolor": "#1c2333", "zeroline": False, "dtick": 0.1,
@@ -186,16 +186,16 @@ def _degrade(uri, user, pwd, db, src_label, rel_type, dst_label,
         deg = DataCompletenessDegrader(uri, user, pwd, db)
         if degrad_method == "property_completeness" and degrad_prop:
             info = deg.degrade_property_completeness("node", src_label, degrad_prop, lam)
-            log(f"  → {info['degraded']} dégradés ({info['final_missing']}/{info['total']} manquants)")
+            log(f"  → {info['degraded']} degraded ({info['final_missing']}/{info['total']} missing)")
         elif degrad_method == "edge_coverage":
             info = deg.degrade_edge_coverage(src_label, rel_type, dst_label, lam)
-            log(f"  → {info['edges_deleted']} arcs supprimés")
+            log(f"  → {info['edges_deleted']} edges deleted")
         elif degrad_method == "property_accuracy" and degrad_prop:
             info = deg.degrade_property_accuracy("node", src_label, degrad_prop, lam)
-            log(f"  → {info['corrupted']}/{info['total']} valeurs corrompues (σ={lam})")
+            log(f"  → {info['corrupted']}/{info['total']} values corrupted (σ={lam})")
         deg.close()
     except Exception as e:
-        log(f"  ✗ Dégradation échouée : {e}")
+        log(f"  ✗ Degradation failed: {e}")
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
@@ -212,35 +212,35 @@ def render_graphml_tab():
                 color:#e8eaf0;margin:6px 0 4px">Graph ML Impact</div>
     <div style="font-family:DM Mono,monospace;font-size:.7rem;color:#5a6480;
                 letter-spacing:.12em;text-transform:uppercase;margin-bottom:20px">
-      Impact de la dégradation sur les performances ML — sklearn</div>
+      Degradation impact on ML performance — sklearn</div>
     """, unsafe_allow_html=True)
 
-    ratio = st.slider("⇔ Répartition (config ↔ résultats)", 30, 70, 38, 5, key="ml_ratio")
+    ratio = st.slider("⇔ Layout (config ↔ results)", 30, 70, 38, 5, key="ml_ratio")
     left, right = st.columns([ratio, 100 - ratio], gap="medium")
 
     # ─────────────────────────────────────────────────────────────────────────
     with left:
         # ① Dataset
         st.markdown("**① Dataset**")
-        dataset_db = st.selectbox("Base de données", dbs, key="ml_db")
+        dataset_db = st.selectbox("Database", dbs, key="ml_db")
         labels     = _labels(uri, user, pwd, dataset_db)
 
-        # ② Structure du graphe
-        st.markdown("**② Structure du graphe**")
-        src_label = st.selectbox("Label nœud source", labels, key="ml_src")
+        # ② Graph structure
+        st.markdown("**② Graph structure**")
+        src_label = st.selectbox("Source node label", labels, key="ml_src")
 
         avail_rels = _rels_for_src(uri, user, pwd, dataset_db, src_label) or []
         if not avail_rels:
             avail_rels = _rels(uri, user, pwd, dataset_db)
-        rel_type = st.selectbox("Type de relation", avail_rels, key="ml_rel")
+        rel_type = st.selectbox("Relationship type", avail_rels, key="ml_rel")
 
         avail_dsts = _dst_for(uri, user, pwd, dataset_db, src_label, rel_type) or labels
-        dst_label  = st.selectbox("Label nœud destination", avail_dsts, key="ml_dst")
+        dst_label  = st.selectbox("Destination node label", avail_dsts, key="ml_dst")
 
-        # ③ Tâche ML
-        st.markdown("**③ Tâche ML**")
+        # ③ ML Task
+        st.markdown("**③ ML Task**")
         task_id = st.selectbox(
-            "Tâche",
+            "Task",
             options=list(TASK_LABELS.keys()),
             format_func=lambda k: TASK_LABELS[k],
             key="ml_task",
@@ -252,66 +252,66 @@ def render_graphml_tab():
             cat_props = _categorical_props(uri, user, pwd, dataset_db, src_label)
             if cat_props:
                 target_property = st.selectbox(
-                    "Propriété cible (catégorielle)", cat_props, key="ml_target")
+                    "Target property (categorical)", cat_props, key="ml_target")
             else:
                 all_props = _node_props(uri, user, pwd, dataset_db, src_label)
                 target_property = st.selectbox(
-                    "Propriété cible", all_props, key="ml_target") if all_props else None
-                st.caption("⚠ Aucune propriété catégorielle détectée.")
+                    "Target property", all_props, key="ml_target") if all_props else None
+                st.caption("⚠ No categorical property detected.")
 
         elif task_id == "node_regression":
             num_props = _numeric_props(uri, user, pwd, dataset_db, src_label)
             if num_props:
                 target_property = st.selectbox(
-                    "Propriété cible (numérique)", num_props, key="ml_target")
+                    "Target property (numeric)", num_props, key="ml_target")
             else:
                 all_props = _node_props(uri, user, pwd, dataset_db, src_label)
                 target_property = st.selectbox(
-                    "Propriété cible", all_props, key="ml_target") if all_props else None
-                st.caption("⚠ Aucune propriété numérique détectée.")
+                    "Target property", all_props, key="ml_target") if all_props else None
+                st.caption("⚠ No numeric property detected.")
 
-        # ④ Algorithmes (max 3)
-        st.markdown("**④ Algorithmes (max 3)**")
+        # ④ Algorithms (max 3)
+        st.markdown("**④ Algorithms (max 3)**")
         algo_pool = list(ALGORITHMS[task_id].keys())
         selected_algos = st.multiselect(
-            "Algorithmes à comparer",
+            "Algorithms to compare",
             options=algo_pool,
             default=algo_pool[:3],
             max_selections=3,
             key="ml_algos",
         )
 
-        # ⑤ Métriques de performance
-        st.markdown("**⑤ Métriques**")
+        # ⑤ Performance metrics
+        st.markdown("**⑤ Metrics**")
         perf_metrics = st.multiselect(
-            "Métriques à afficher",
+            "Metrics to display",
             options=TASK_METRICS[task_id],
             default=TASK_METRICS[task_id][:2],
             key="ml_perf",
         )
 
-        # ⑥ Dégradation
-        st.markdown("**⑥ Dégradation**")
-        degrad_dim    = st.selectbox("Dimension de dégradation",
+        # ⑥ Degradation
+        st.markdown("**⑥ Degradation**")
+        degrad_dim    = st.selectbox("Degradation dimension",
                                      list(DEGRAD_DIMS.keys()), key="ml_ddim")
         degrad_method = DEGRAD_DIMS[degrad_dim]
         degrad_prop   = None
 
         if degrad_method == "property_completeness":
             props = _node_props(uri, user, pwd, dataset_db, src_label)
-            degrad_prop = st.selectbox("Propriété à dégrader", props,
+            degrad_prop = st.selectbox("Property to degrade", props,
                                        key="ml_dprop") if props else None
 
         elif degrad_method == "property_accuracy":
             num_props = _numeric_props(uri, user, pwd, dataset_db, src_label)
-            degrad_prop = st.selectbox("Propriété numérique à corrompre", num_props,
+            degrad_prop = st.selectbox("Numeric property to corrupt", num_props,
                                        key="ml_dprop_acc") if num_props else None
             if not num_props:
-                st.warning("Aucune propriété numérique trouvée.")
+                st.warning("No numeric property found.")
 
-        st.caption(f"λ fixe : {LAMBDA_RANGE}  (pas = 0.1)")
+        st.caption(f"Fixed λ: {LAMBDA_RANGE}  (step = 0.1)")
 
-        run_btn = st.button("▶  Lancer l'expérience", key="ml_run",
+        run_btn = st.button("▶  Run experiment", key="ml_run",
                             width="stretch", type="primary")
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -320,17 +320,17 @@ def render_graphml_tab():
             st.markdown("""
             <div style="padding:48px 24px;text-align:center;color:#5a6480;
                         font-family:DM Mono,monospace;font-size:.82rem">
-              ◎ Configurez l'expérience à gauche<br>et cliquez
-              <strong style="color:#e8eaf0">▶ Lancer l'expérience</strong>.
+              ◎ Configure the experiment on the left<br>and click
+              <strong style="color:#e8eaf0">▶ Run experiment</strong>.
             </div>""", unsafe_allow_html=True)
 
         # ── Run experiment ──────────────────────────────────────────────────
         if run_btn:
             if not selected_algos:
-                st.error("Sélectionnez au moins un algorithme.")
+                st.error("Select at least one algorithm.")
                 st.stop()
             if not perf_metrics:
-                st.error("Sélectionnez au moins une métrique.")
+                st.error("Select at least one metric.")
                 st.stop()
 
             # Build cache config key
@@ -350,7 +350,7 @@ def render_graphml_tab():
 
             cached = proj.load_ml_cache(cache_config)
             if cached:
-                st.info("Cache trouvé — chargement des résultats précédents.")
+                st.info("Cache found — loading previous results.")
                 st.session_state.ml_results = {
                     "task":       TASK_LABELS[task_id],
                     "dim":        degrad_dim,
@@ -376,28 +376,28 @@ def render_graphml_tab():
             progress = st.progress(0)
             total    = len(LAMBDA_RANGE)
 
-            log("📦 Sauvegarde complète des nœuds…")
+            log("📦 Backing up nodes...")
             node_backup = _backup_nodes(uri, user, pwd, dataset_db, src_label)
-            log(f"   {len(node_backup)} nœuds sauvegardés.")
+            log(f"   {len(node_backup)} nodes backed up.")
 
             edge_backup = None
             if degrad_method == "edge_coverage":
-                log("📦 Sauvegarde des arcs…")
+                log("📦 Backing up edges...")
                 edge_backup = _backup_edges(uri, user, pwd, dataset_db,
                                             src_label, rel_type, dst_label)
-                log(f"   {len(edge_backup)} arcs sauvegardés.")
+                log(f"   {len(edge_backup)} edges backed up.")
 
             for step_i, lam in enumerate(LAMBDA_RANGE):
                 log(f"\n══ λ = {lam:.1f} ═══════════════════")
 
                 # Degrade
-                log(f"  Dégradation λ={lam:.1f}…")
+                log(f"  Degradation λ={lam:.1f}...")
                 _degrade(uri, user, pwd, dataset_db, src_label, rel_type, dst_label,
                          degrad_method, degrad_prop, lam, log)
 
                 # Train each algorithm
                 for algo_name in selected_algos:
-                    log(f"  [{algo_name}] entraînement…")
+                    log(f"  [{algo_name}] training...")
                     try:
                         ml = SklearnGraphML(uri, user, pwd, dataset_db)
                         scores = ml.run_task(
@@ -415,21 +415,21 @@ def render_graphml_tab():
                             results[algo_name][m][lam] = None
 
                 # Restore
-                log("  Restauration…")
+                log("  Restoring...")
                 try:
                     _restore_nodes(uri, user, pwd, dataset_db, src_label, node_backup)
                     if degrad_method == "edge_coverage" and edge_backup is not None:
                         _restore_edges(uri, user, pwd, dataset_db,
                                        src_label, rel_type, dst_label, edge_backup)
-                    log("  ✓ Restauré")
+                    log("  ✓ Restored")
                 except Exception as e:
-                    log(f"  ⚠ Restauration : {e}")
+                    log(f"  ⚠ Restore failed: {e}")
 
                 progress.progress((step_i + 1) / total)
 
-            log("\n✅ Expérience terminée — sauvegarde dans le projet…")
+            log("\n✅ Experiment complete — saving to project...")
             proj.save_ml_cache(cache_config, results)
-            log("✅ Résultats mis en cache.")
+            log("✅ Results cached.")
 
             st.session_state.ml_results = {
                 "task":       TASK_LABELS[task_id],
@@ -458,7 +458,7 @@ def render_graphml_tab():
         header_parts = [
             f"<span style='font-family:Syne;font-weight:700;font-size:1.1rem'>{task_lbl}</span>",
             f"<span style='font-family:DM Mono;font-size:.68rem;color:#5a6480;"
-            f"margin-left:12px'>dégradation: {degrad_lbl}</span>",
+            f"margin-left:12px'>degradation: {degrad_lbl}</span>",
         ]
         if res.get("computed_at"):
             header_parts.append(
@@ -482,6 +482,6 @@ def render_graphml_tab():
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
         # Clear button
-        if st.button("↺  Réinitialiser les résultats", key="ml_clear", width="stretch"):
+        if st.button("↺  Reset results", key="ml_clear", width="stretch"):
             st.session_state.pop("ml_results", None)
             st.rerun()

@@ -155,9 +155,9 @@ def _format_value(value, display_type: str) -> str:
         return f"{v:.1%}"
     if display_type == "age":
         days = v / 86400
-        return f"{days:.1f} j"
+        return f"{days:.1f} d"
     if display_type == "frequency":
-        return f"{v:.3f} màj/j"
+        return f"{v:.3f} upd/d"
     if display_type == "accuracy":
         return f"{v:.4f} (MAE)"
     return f"{v:.4f}"
@@ -445,18 +445,18 @@ def render_quality_tab():
 
     st.markdown('<div class="q-page-title">Data Quality Insights</div>',
                 unsafe_allow_html=True)
-    st.markdown('<div class="q-page-sub">Évaluation de la qualité — résultats sauvegardés dans le projet</div>',
+    st.markdown('<div class="q-page-sub">Quality assessment — results saved in the project</div>',
                 unsafe_allow_html=True)
 
     # ── Database selector ──
-    st.markdown('<div class="sec-hd">⬢  Bases de données</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-hd">⬢  Databases</div>', unsafe_allow_html=True)
     selected_dbs = st.multiselect(
         "Select databases", options=dbs,
         default=[dbs[0]] if dbs else [],
         key="q_dbs", label_visibility="collapsed",
     )
     if not selected_dbs:
-        st.markdown('<div class="info-strip">Sélectionnez au moins une base de données.</div>',
+        st.markdown('<div class="info-strip">Select at least one database.</div>',
                     unsafe_allow_html=True)
         return
 
@@ -471,20 +471,20 @@ def render_quality_tab():
     st.markdown(f'<div class="db-pills">{"".join(pills)}</div>', unsafe_allow_html=True)
 
     # ── Two-column layout ──
-    ratio = st.slider("⇔ Répartition (config ↔ résultats)", 30, 70, 40, 5, key="q_ratio")
+    ratio = st.slider("⇔ Layout (config ↔ results)", 30, 70, 40, 5, key="q_ratio")
     col_cfg, col_res = st.columns([ratio, 100 - ratio], gap="medium")
 
     ref_db = selected_dbs[0]
 
     # ── LEFT: metric config & evaluate buttons ──
     with col_cfg:
-        st.markdown('<div class="sec-hd">⬢  Dimensions &amp; Métriques</div>',
+        st.markdown('<div class="sec-hd">⬢  Dimensions &amp; Metrics</div>',
                     unsafe_allow_html=True)
 
         for dim_name, dim_info in DIMENSIONS.items():
             color = dim_info["color"]
             with st.expander(
-                f"{dim_info['icon']}  {dim_name}  ·  {len(dim_info['metrics'])} métriques",
+                f"{dim_info['icon']}  {dim_name}  ·  {len(dim_info['metrics'])} metrics",
                 expanded=False,
             ):
                 for metric_id, metric_label in dim_info["metrics"].items():
@@ -497,14 +497,14 @@ def render_quality_tab():
                         prefix=f"q_{metric_id}",
                     )
 
-                    if st.button(f"▶  Évaluer", key=f"run_{metric_id}", width="stretch"):
-                        with st.spinner(f"Calcul de {metric_label}…"):
+                    if st.button(f"▶  Evaluate", key=f"run_{metric_id}", width="stretch"):
+                        with st.spinner(f"Computing {metric_label}..."):
                             for db in selected_dbs:
                                 value, display_type = _run_metric(
                                     metric_id, params, uri, user, pwd, db
                                 )
                                 if display_type == "error":
-                                    st.error(f"Erreur sur {db}")
+                                    st.error(f"Error on {db}")
                                     continue
 
                                 elem_type, label_disp = _label_display(metric_id, params)
@@ -538,7 +538,7 @@ def render_quality_tab():
 
     # ── RIGHT: summary tables per dimension ──
     with col_res:
-        st.markdown('<div class="sec-hd">⬢  Résultats par dimension</div>',
+        st.markdown('<div class="sec-hd">⬢  Results by dimension</div>',
                     unsafe_allow_html=True)
 
         results_by_dim = proj.results_by_dimension()
@@ -556,7 +556,7 @@ def render_quality_tab():
             <div class="info-strip">
               No results in this project yet.<br>
               Select a metric on the left and click
-              <strong>▶ Évaluer</strong>.
+              <strong>▶ Evaluate</strong>.
             </div>""", unsafe_allow_html=True)
             return
 

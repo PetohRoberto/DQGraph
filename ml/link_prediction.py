@@ -274,34 +274,34 @@ class LinkPredictionPipeline:
                 return {'success': False, 'error': f'Unknown feature: {f}', 'elapsed': 0}
 
         try:
-            log("📐 Projection du graphe en mémoire...")
+            log("📐 Projecting graph into memory...")
             graph_stats = self._project(g, src_label, dst_label, rel_type, node_props)
 
-            log("🔧 Création du pipeline GDS...")
+            log("🔧 Creating GDS pipeline...")
             self._create_pipeline(p)
 
-            log("🔢 Génération des embeddings FastRP...")
+            log("🔢 Generating FastRP embeddings...")
             self._add_fastrp(p, g, embedding_dim)
 
-            log("➕ Ajout des features...")
+            log("➕ Adding features...")
             self._add_features(p, features_upper)
 
-            log("⚙️ Configuration du split train/test...")
+            log("⚙️ Configuring train/test split...")
             self._configure_split(p, test_fraction, train_fraction, 1.0)
 
-            log(f"🤖 Ajout du modèle ({algorithm})...")
+            log(f"🤖 Adding model ({algorithm})...")
             self._add_model(p, algorithm)
 
-            log("🚀 Entraînement en cours...")
+            log("🚀 Training in progress...")
             train_result = self._train(g, p, m, rel_type,
                                        src_label, dst_label,
                                        ["AUCPR"], 4)
 
-            log("🔮 Génération des prédictions...")
+            log("🔮 Generating predictions...")
             predictions = self._predict(g, m, top_n, threshold)
 
             elapsed = round(time.time() - ts, 1)
-            log(f"✅ Terminé en {elapsed}s — {len(predictions)} prédictions")
+            log(f"✅ Done in {elapsed}s — {len(predictions)} predictions")
 
             return {
                 "success":         True,
