@@ -20,7 +20,7 @@ from neo4j import GraphDatabase
 from ui.schema import SchemaExplorer
 from degraders import DataCompletenessDegrader
 from ml.ml_sklearn import (
-    SklearnGraphML, ALGORITHMS, TASK_METRICS, TASK_LABELS, LAMBDA_RANGE,
+    SklearnGraphML, ALGORITHMS, TASK_METRICS, TASK_LABELS,
     ALGO_CLASSIFIERS, ALGO_REGRESSORS, ALGO_LP,
 )
 from project_manager import Project
@@ -181,18 +181,27 @@ def _make_multi_algo_chart(
 # ── apply degradation ─────────────────────────────────────────────────────────
 
 def _degrade(uri, user, pwd, db, src_label, rel_type, dst_label,
-             degrad_method, degrad_prop, lam, log):
+             degrad_method, degrad_prop, lam, log, prev_lam=0.0):
+    # For completeness/accuracy: apply only the increment since the last step.
+    # For edge_coverage: the method tracks current state internally, so pass lam.
+    delta = round(lam - prev_lam, 1)
     try:
         deg = DataCompletenessDegrader(uri, user, pwd, db)
-        if degrad_method == "property_completeness" and degrad_prop:
-            info = deg.degrade_property_completeness("node", src_label, degrad_prop, lam)
-            log(f"  → {info['degraded']} degraded ({info['final_missing']}/{info['total']} missing)")
+        if degrad_method == "property_completeness":
+            # Pass cumulative lam — method handles delta per property via already_missing
+            info = deg.degrade_all_completeness("node", src_label, lam)
+            log(f"  → {info['total_properties']} properties targeted at {lam:.0%} missing "
+                f"({info['total_removed']} values removed this step)")
         elif degrad_method == "edge_coverage":
             info = deg.degrade_edge_coverage(src_label, rel_type, dst_label, lam)
-            log(f"  → {info['edges_deleted']} edges deleted")
-        elif degrad_method == "property_accuracy" and degrad_prop:
-            info = deg.degrade_property_accuracy("node", src_label, degrad_prop, lam)
-            log(f"  → {info['corrupted']}/{info['total']} values corrupted (σ={lam})")
+            log(f"  → {info['edges_deleted']} edges deleted (cumul. λ={lam:.1f})")
+        elif degrad_method == "property_accuracy":
+            if delta <= 0:
+                log("  → Δλ=0, no additional accuracy degradation")
+            else:
+                info = deg.degrade_all_accuracy("node", src_label, delta)
+                log(f"  → {info['total_numeric_properties']} numeric properties: "
+                    f"{info['total_corrupted']} values corrupted (Δ={delta:.0%} of instances)")
         deg.close()
     except Exception as e:
         log(f"  ✗ Degradation failed: {e}")
@@ -297,19 +306,19 @@ def render_graphml_tab():
         degrad_method = DEGRAD_DIMS[degrad_dim]
         degrad_prop   = None
 
-        if degrad_method == "property_completeness":
-            props = _node_props(uri, user, pwd, dataset_db, src_label)
-            degrad_prop = st.selectbox("Property to degrade", props,
-                                       key="ml_dprop") if props else None
-
-        elif degrad_method == "property_accuracy":
-            num_props = _numeric_props(uri, user, pwd, dataset_db, src_label)
-            degrad_prop = st.selectbox("Numeric property to corrupt", num_props,
-                                       key="ml_dprop_acc") if num_props else None
-            if not num_props:
-                st.warning("No numeric property found.")
-
-        st.caption(f"Fixed λ: {LAMBDA_RANGE}  (step = 0.1)")
+        lam_range = st.slider(
+            "λ range  (step = 0.1)",
+            min_value=0.0, max_value=0.9,
+            value=(0.0, 0.9),
+            step=0.1,
+            key="ml_lambda_range",
+        )
+        _lmin, _lmax = lam_range
+        selected_lambdas = [
+            round(_lmin + i * 0.1, 1)
+            for i in range(round((_lmax - _lmin) / 0.1) + 1)
+        ]
+        st.caption(f"λ = {selected_lambdas}  (step = 0.1)")
 
         run_btn = st.button("▶  Run experiment", key="ml_run",
                             width="stretch", type="primary")
@@ -345,20 +354,21 @@ def render_graphml_tab():
                 "degrad_prop":   degrad_prop,
                 "algorithms":    sorted(selected_algos),
                 "perf_metrics":  sorted(perf_metrics),
-                "lambdas":       LAMBDA_RANGE,
+                "lambdas":       selected_lambdas,
             }
 
             cached = proj.load_ml_cache(cache_config)
             if cached:
                 st.info("Cache found — loading previous results.")
                 st.session_state.ml_results = {
-                    "task":       TASK_LABELS[task_id],
-                    "dim":        degrad_dim,
-                    "algorithms": selected_algos,
-                    "metrics":    perf_metrics,
-                    "lambdas":    LAMBDA_RANGE,
-                    "data":       _normalize_results(cached["results"]),
+                    "task":        TASK_LABELS[task_id],
+                    "dim":         degrad_dim,
+                    "algorithms":  selected_algos,
+                    "metrics":     perf_metrics,
+                    "lambdas":     selected_lambdas,
+                    "data":        _normalize_results(cached["results"]),
                     "computed_at": cached.get("computed_at", ""),
+                    "cache_config": cache_config,
                 }
                 st.rerun()
 
@@ -374,7 +384,7 @@ def render_graphml_tab():
             results: dict = {a: {m: {} for m in perf_metrics} for a in selected_algos}
 
             progress = st.progress(0)
-            total    = len(LAMBDA_RANGE)
+            total    = len(selected_lambdas)
 
             log("📦 Backing up nodes...")
             node_backup = _backup_nodes(uri, user, pwd, dataset_db, src_label)
@@ -387,13 +397,14 @@ def render_graphml_tab():
                                             src_label, rel_type, dst_label)
                 log(f"   {len(edge_backup)} edges backed up.")
 
-            for step_i, lam in enumerate(LAMBDA_RANGE):
+            prev_lam = 0.0
+            for step_i, lam in enumerate(selected_lambdas):
                 log(f"\n══ λ = {lam:.1f} ═══════════════════")
 
-                # Degrade
-                log(f"  Degradation λ={lam:.1f}...")
+                # Progressive degradation: apply only the increment Δλ = lam - prev_lam
+                log(f"  Degradation Δλ={round(lam - prev_lam, 1):.1f} (cumul. λ={lam:.1f})...")
                 _degrade(uri, user, pwd, dataset_db, src_label, rel_type, dst_label,
-                         degrad_method, degrad_prop, lam, log)
+                         degrad_method, degrad_prop, lam, log, prev_lam=prev_lam)
 
                 # Train each algorithm
                 for algo_name in selected_algos:
@@ -405,6 +416,8 @@ def render_graphml_tab():
                             target_property, algo_name,
                         )
                         ml.close()
+                        if scores.get("_diag"):
+                            log(f"    ▸ {scores['_diag']}")
                         for m in perf_metrics:
                             val = scores.get(m)
                             results[algo_name][m][lam] = float(val) if val is not None else None
@@ -414,31 +427,33 @@ def render_graphml_tab():
                         for m in perf_metrics:
                             results[algo_name][m][lam] = None
 
-                # Restore
-                log("  Restoring...")
-                try:
-                    _restore_nodes(uri, user, pwd, dataset_db, src_label, node_backup)
-                    if degrad_method == "edge_coverage" and edge_backup is not None:
-                        _restore_edges(uri, user, pwd, dataset_db,
-                                       src_label, rel_type, dst_label, edge_backup)
-                    log("  ✓ Restored")
-                except Exception as e:
-                    log(f"  ⚠ Restore failed: {e}")
-
+                prev_lam = lam
                 progress.progress((step_i + 1) / total)
+
+            # Single restore after all steps
+            log("\n  Restoring original data...")
+            try:
+                _restore_nodes(uri, user, pwd, dataset_db, src_label, node_backup)
+                if degrad_method == "edge_coverage" and edge_backup is not None:
+                    _restore_edges(uri, user, pwd, dataset_db,
+                                   src_label, rel_type, dst_label, edge_backup)
+                log("  ✓ Restored")
+            except Exception as e:
+                log(f"  ⚠ Restore failed: {e}")
 
             log("\n✅ Experiment complete — saving to project...")
             proj.save_ml_cache(cache_config, results)
             log("✅ Results cached.")
 
             st.session_state.ml_results = {
-                "task":       TASK_LABELS[task_id],
-                "dim":        degrad_dim,
-                "algorithms": selected_algos,
-                "metrics":    perf_metrics,
-                "lambdas":    LAMBDA_RANGE,
-                "data":       _normalize_results(results),
+                "task":        TASK_LABELS[task_id],
+                "dim":         degrad_dim,
+                "algorithms":  selected_algos,
+                "metrics":     perf_metrics,
+                "lambdas":     selected_lambdas,
+                "data":        _normalize_results(results),
                 "computed_at": "",
+                "cache_config": cache_config,
             }
             log_ph.empty()
             st.rerun()
@@ -481,7 +496,10 @@ def render_graphml_tab():
             st.plotly_chart(fig, width="stretch", key=f"ml_fig_{metric_name}")
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-        # Clear button
+        # Clear button — removes display AND disk cache so the next run re-trains
         if st.button("↺  Reset results", key="ml_clear", width="stretch"):
+            cached_cfg = res.get("cache_config")
+            if cached_cfg:
+                proj.delete_ml_cache(cached_cfg)
             st.session_state.pop("ml_results", None)
             st.rerun()

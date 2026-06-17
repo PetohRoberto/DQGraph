@@ -119,6 +119,11 @@ class Project:
                 "computed_at": datetime.now().isoformat(),
             }, f, indent=2, default=str)
 
+    def delete_ml_cache(self, config: dict):
+        path = os.path.join(self.ml_cache_dir, f"{self._cache_key(config)}.json")
+        if os.path.exists(path):
+            os.remove(path)
+
     # ── Factory ───────────────────────────────────────────────────────────────
 
     @classmethod
