@@ -339,7 +339,7 @@ def _render_age(res):
     with c1:
         st.markdown(f"""
         <div class="score-card">
-            <div class="score-value" style="color:#f7ae6a">{days:.2f}</div>
+            <div class="score-value" style="color:#d99a2b">{days:.2f}</div>
             <div class="score-label">jours (âge moyen)</div>
         </div>""", unsafe_allow_html=True)
     with c2:
@@ -398,7 +398,7 @@ def _render_frequency(res):
     with c1:
         st.markdown(f"""
         <div class="score-card">
-            <div class="score-value" style="color:#a89cf7">{val:.2f}</div>
+            <div class="score-value" style="color:#3968d1">{val:.2f}</div>
             <div class="score-label">MAJ moyennes / instance sur {days}j</div>
         </div>""", unsafe_allow_html=True)
     with c2:
@@ -721,7 +721,7 @@ def _render_delay(res):
     with c1:
         st.markdown(f"""
         <div class="score-card">
-            <div class="score-value" style="color:#a89cf7">{hours:.2f}</div>
+            <div class="score-value" style="color:#3968d1">{hours:.2f}</div>
             <div class="score-label">heures (délai moyen entre MAJ)</div>
         </div>""", unsafe_allow_html=True)
     with c2:
@@ -742,7 +742,7 @@ def _render_accuracy(res):
     with c1:
         st.markdown(f"""
         <div class="score-card">
-            <div class="score-value" style="color:#f7ae6a">{val:.4f}</div>
+            <div class="score-value" style="color:#d99a2b">{val:.4f}</div>
             <div class="score-label">Erreur absolue moyenne</div>
         </div>""", unsafe_allow_html=True)
     with c2:
@@ -765,7 +765,7 @@ def _render_accuracy_multi(res):
     with c1:
         st.markdown(f"""
         <div class="score-card">
-            <div class="score-value" style="color:#f7ae6a">{val:.4f}</div>
+            <div class="score-value" style="color:#d99a2b">{val:.4f}</div>
             <div class="score-label">Erreur absolue moyenne globale</div>
         </div>""", unsafe_allow_html=True)
     with c2:

@@ -50,19 +50,19 @@ def _render_degrade_result(result: dict, method: str):
     if method == "property":
         cols = st.columns(4)
         metrics = [
-            ("Total instances",    result["total"],          "#a89cf7"),
-            ("Déjà manquantes",    result["already_missing"],"#f7ae6a"),
-            ("Dégradées",          result["degraded"],        "#f76a7c"),
-            ("Total manquantes",   result["final_missing"],   "#5ce8b0"),
+            ("Total instances",    result["total"],          "#3968d1"),
+            ("Déjà manquantes",    result["already_missing"],"#d99a2b"),
+            ("Dégradées",          result["degraded"],        "#e15a5a"),
+            ("Total manquantes",   result["final_missing"],   "#00a884"),
         ]
     else:  # edge_coverage
         cols = st.columns(5)
         metrics = [
-            ("Nœuds source",       result["total_src"],       "#a89cf7"),
-            ("Déjà sans arc",      result["already_no_edge"], "#f7ae6a"),
-            ("Nœuds dégradés",     result["degraded_nodes"],  "#f76a7c"),
-            ("Arcs supprimés",     result["edges_deleted"],   "#5ce8b0"),
-            ("Total sans arc",     result["final_no_edge"],   "#e2e2f0"),
+            ("Nœuds source",       result["total_src"],       "#3968d1"),
+            ("Déjà sans arc",      result["already_no_edge"], "#d99a2b"),
+            ("Nœuds dégradés",     result["degraded_nodes"],  "#e15a5a"),
+            ("Arcs supprimés",     result["edges_deleted"],   "#00a884"),
+            ("Total sans arc",     result["final_no_edge"],   "#191c26"),
         ]
 
     for col, (label, value, color) in zip(cols, metrics):
@@ -76,7 +76,7 @@ def _render_degrade_result(result: dict, method: str):
     # Taux final
     if method == "property" and result["total"] > 0:
         rate = result["final_missing"] / result["total"]
-        color = "#5ce8b0" if rate < 0.2 else ("#f7ae6a" if rate < 0.5 else "#f76a7c")
+        color = "#00a884" if rate < 0.2 else ("#d99a2b" if rate < 0.5 else "#e15a5a")
         st.markdown(f"""
         <div class="info-box" style="margin-top:1rem">
             Taux de valeurs manquantes après dégradation :
@@ -84,7 +84,7 @@ def _render_degrade_result(result: dict, method: str):
         </div>""", unsafe_allow_html=True)
     elif method == "edge" and result["total_src"] > 0:
         rate = result["final_no_edge"] / result["total_src"]
-        color = "#5ce8b0" if rate < 0.2 else ("#f7ae6a" if rate < 0.5 else "#f76a7c")
+        color = "#00a884" if rate < 0.2 else ("#d99a2b" if rate < 0.5 else "#e15a5a")
         st.markdown(f"""
         <div class="info-box" style="margin-top:1rem">
             Taux de nœuds source sans arc après dégradation :

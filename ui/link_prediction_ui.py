@@ -87,8 +87,8 @@ def _render_model_metrics(model_info: dict, model_selection: dict, elapsed: floa
     with cols[0]:
         aucpr = metrics.get("AUCPR", {})
         test_val = aucpr.get("test", None) if isinstance(aucpr, dict) else aucpr
-        color = "#5ce8b0" if (test_val or 0) >= 0.7 else (
-                "#f7ae6a" if (test_val or 0) >= 0.5 else "#f76a7c")
+        color = "#00a884" if (test_val or 0) >= 0.7 else (
+                "#d99a2b" if (test_val or 0) >= 0.5 else "#e15a5a")
         val_str = f"{test_val:.4f}" if test_val is not None else "N/A"
         st.markdown(f"""
         <div class="score-card">
@@ -99,7 +99,7 @@ def _render_model_metrics(model_info: dict, model_selection: dict, elapsed: floa
     with cols[1]:
         st.markdown(f"""
         <div class="score-card">
-            <div class="score-value" style="color:#a89cf7;font-size:2.2rem">{elapsed}s</div>
+            <div class="score-value" style="color:#3968d1;font-size:2.2rem">{elapsed}s</div>
             <div class="score-label">Training time</div>
         </div>""", unsafe_allow_html=True)
 
@@ -108,7 +108,7 @@ def _render_model_metrics(model_info: dict, model_selection: dict, elapsed: floa
                        if model_selection else 0
         st.markdown(f"""
         <div class="score-card">
-            <div class="score-value" style="color:#5ce8b0;font-size:2.2rem">{n_candidates}</div>
+            <div class="score-value" style="color:#00a884;font-size:2.2rem">{n_candidates}</div>
             <div class="score-label">Candidates evaluated</div>
         </div>""", unsafe_allow_html=True)
 
@@ -153,28 +153,28 @@ def _render_predictions(predictions: list[dict], rel_type: str):
         x=[f"{r['Node 1']} → {r['Node 2']}" for r in rows],
         y=[r["Probability"] for r in rows],
         marker_color=[
-            "#5ce8b0" if r["Probability"] >= 0.7
-            else ("#f7ae6a" if r["Probability"] >= 0.5 else "#f76a7c")
+            "#00a884" if r["Probability"] >= 0.7
+            else ("#d99a2b" if r["Probability"] >= 0.5 else "#e15a5a")
             for r in rows
         ],
         text=[f"{r['Probability']:.3f}" for r in rows],
         textposition="outside",
-        textfont={"family": "Space Mono", "size": 10, "color": "#e2e2f0"},
+        textfont={"family": "Space Mono", "size": 10, "color": "#191c26"},
     ))
     fig.update_layout(
         title={"text": "Probability score per pair",
-               "font": {"family": "Syne", "size": 13, "color": "#8888aa"}},
+               "font": {"family": "Syne", "size": 13, "color": "#6b7085"}},
         height=340,
         margin=dict(l=10, r=10, t=50, b=80),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         xaxis={
-            "tickfont": {"family": "Space Mono", "size": 9, "color": "#8888aa"},
+            "tickfont": {"family": "Space Mono", "size": 9, "color": "#6b7085"},
             "tickangle": -35,
-            "gridcolor": "#1e1e2e",
+            "gridcolor": "#e1e4ea",
         },
-        yaxis={"range": [0, 1.15], "gridcolor": "#1e1e2e",
-               "tickfont": {"size": 10, "color": "#555570"}},
+        yaxis={"range": [0, 1.15], "gridcolor": "#e1e4ea",
+               "tickfont": {"size": 10, "color": "#6b7085"}},
         showlegend=False,
     )
     st.plotly_chart(fig, use_container_width=True, key="lp_bar")

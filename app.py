@@ -4,9 +4,17 @@ app.py — Entry point: login → project selection/creation → tabs.
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 
+import threading
 import streamlit as st
 from neo4j import GraphDatabase
 from project_manager import Project
+
+# sklearn/scipy take seconds to import: warm them up in the background at
+# startup so the Graph ML page opens without waiting.
+if "ml.ml_sklearn" not in sys.modules and not any(
+        t.name == "ml-preload" for t in threading.enumerate()):
+    threading.Thread(target=lambda: __import__("ml.ml_sklearn"),
+                     name="ml-preload", daemon=True).start()
 
 st.set_page_config(
     page_title="DQGraph",
@@ -34,17 +42,17 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap');
 
 :root {
-  --bg:        #080b12;
-  --surface:   #0e1320;
-  --border:    #1c2333;
-  --border2:   #2a3450;
-  --text:      #e8eaf0;
-  --muted:     #5a6480;
-  --accent:    #4f8cff;
-  --accent2:   #00e5c0;
-  --accent3:   #ff6b6b;
-  --accent4:   #ffd166;
-  --card:      #0c1018;
+  --bg:        #ffffff;
+  --surface:   #f4f5f8;
+  --border:    #e1e4ea;
+  --border2:   #cdd2de;
+  --text:      #191c26;
+  --muted:     #6b7085;
+  --accent:    #3968d1;
+  --accent2:   #00a884;
+  --accent3:   #e15a5a;
+  --accent4:   #d99a2b;
+  --card:      #f4f5f8;
 }
 
 html, body, [class*="css"], .stApp {
@@ -79,6 +87,11 @@ h1, h2, h3, h4 { font-family: 'Syne', sans-serif; }
   font-family: 'DM Mono', monospace !important;
   font-size: 0.82rem !important;
 }
+[data-testid="stTextInput"] input::placeholder,
+[data-testid="stNumberInput"] input::placeholder {
+  color: var(--muted) !important;
+  opacity: 1 !important;
+}
 [data-testid="stTextInput"] label,
 [data-testid="stSelectbox"] label,
 [data-testid="stMultiSelect"] label,
@@ -96,6 +109,13 @@ h1, h2, h3, h4 { font-family: 'Syne', sans-serif; }
   font-weight: 600 !important;
   border-radius: 8px !important;
   transition: all .2s !important;
+  background: var(--card) !important;
+  border: 1px solid var(--border2) !important;
+  color: var(--text) !important;
+}
+[data-testid="stButton"] > button:hover {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
 }
 [data-testid="stButton"] > button[kind="primary"] {
   background: linear-gradient(135deg, var(--accent) 0%, #6fa8ff 100%) !important;
@@ -103,6 +123,9 @@ h1, h2, h3, h4 { font-family: 'Syne', sans-serif; }
   color: #fff !important;
   font-size: 0.95rem !important;
   padding: 12px !important;
+}
+[data-testid="stButton"] > button[kind="primary"]:hover {
+  color: #fff !important;
 }
 
 [data-testid="stTabs"] [data-baseweb="tab-list"] {
@@ -163,9 +186,9 @@ h1, h2, h3, h4 { font-family: 'Syne', sans-serif; }
   font-family: 'DM Mono', monospace;
   font-size: 0.65rem;
   letter-spacing: 0.1em;
-  background: rgba(0,229,192,.1);
+  background: rgba(0,168,132,.1);
   color: var(--accent2);
-  border: 1px solid rgba(0,229,192,.2);
+  border: 1px solid rgba(0,168,132,.2);
   padding: 3px 10px;
   border-radius: 20px;
 }
@@ -173,9 +196,9 @@ h1, h2, h3, h4 { font-family: 'Syne', sans-serif; }
   font-family: 'DM Mono', monospace;
   font-size: 0.65rem;
   letter-spacing: 0.1em;
-  background: rgba(79,140,255,.1);
+  background: rgba(57,104,209,.1);
   color: var(--accent);
-  border: 1px solid rgba(79,140,255,.2);
+  border: 1px solid rgba(57,104,209,.2);
   padding: 3px 10px;
   border-radius: 20px;
 }
@@ -277,7 +300,7 @@ if st.session_state.project is None:
             if not existing:
                 st.markdown(
                     "<div style='padding:24px 0;font-family:DM Mono,monospace;"
-                    "font-size:.78rem;color:#5a6480;text-align:center'>"
+                    "font-size:.78rem;color:#6b7085;text-align:center'>"
                     "No existing projects.</div>",
                     unsafe_allow_html=True,
                 )
@@ -308,7 +331,7 @@ if st.session_state.project is None:
 
         from project_manager import PROJECTS_ROOT
         st.markdown(
-            f'<div style="font-family:DM Mono,monospace;font-size:.65rem;color:#5a6480;'
+            f'<div style="font-family:DM Mono,monospace;font-size:.65rem;color:#6b7085;'
             f'text-align:center;margin-top:8px">📁 Projects stored in: {PROJECTS_ROOT}</div>',
             unsafe_allow_html=True,
         )
@@ -346,12 +369,34 @@ with h6:
         st.rerun()
 
 # ── TABS ──────────────────────────────────────────────────────────────────────
-tab1, tab2 = st.tabs(["◈   Data Quality Insights", "◉   Graph ML Impact"])
+# st.tabs runs every tab on every rerun; a selector renders only the active page.
+PAGES = ["◈   Data Quality Insights", "◉   Graph ML Impact"]
 
-with tab1:
+
+def _keep_page():
+    # Clicking the selected option deselects it: stay on the current page instead.
+    if st.session_state.active_page is None:
+        st.session_state.active_page = st.session_state.get("_last_page", PAGES[0])
+    st.session_state._last_page = st.session_state.active_page
+
+
+st.session_state.setdefault("active_page", PAGES[0])
+page = st.segmented_control(
+    "Page", PAGES, key="active_page",
+    label_visibility="collapsed", on_change=_keep_page,
+) or st.session_state.get("_last_page", PAGES[0])
+
+# Streamlit forgets the state of widgets that are not rendered; re-assigning the
+# hidden page's keys keeps its settings when switching back (buttons can't be set).
+_BUTTON_KEYS = {"ml_run", "ml_clear", "ml_stop", "clear_q", "q_refresh_schema"}
+_hidden_prefix = "ml_" if page == PAGES[0] else "q_"
+for _k in list(st.session_state.keys()):
+    if _k.startswith(_hidden_prefix) and _k not in _BUTTON_KEYS:
+        st.session_state[_k] = st.session_state[_k]
+
+if page == PAGES[0]:
     from pages.tab_quality import render_quality_tab
     render_quality_tab()
-
-with tab2:
+else:
     from pages.tab_graphml import render_graphml_tab
     render_graphml_tab()

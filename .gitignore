@@ -1,3 +1,6 @@
 /.claude
 /trash
 /venv
+/demo_paper
+/help.ipynb
+__pycache__/

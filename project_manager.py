@@ -89,10 +89,19 @@ class Project:
         self.quality_results.append(entry)
         self.save()
 
-    def results_by_dimension(self) -> dict:
-        """Returns {dimension: [entries]} ordered by dimension."""
+    def clear_quality_results(self, db: str | None = None):
+        """Remove the quality results of `db` (all of them if None) and persist."""
+        self.quality_results = ([] if db is None else
+                                [r for r in self.quality_results if r.get("db") != db])
+        self.save()
+
+    def results_by_dimension(self, db: str | None = None) -> dict:
+        """Returns {dimension: [entries]} ordered by dimension, only for `db`
+        when given."""
         out = {}
         for r in self.quality_results:
+            if db is not None and r.get("db") != db:
+                continue
             dim = METRIC_TO_DIMENSION.get(r.get("metric_id", ""), "Other")
             out.setdefault(dim, []).append(r)
         return out

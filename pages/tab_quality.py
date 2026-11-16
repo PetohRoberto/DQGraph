@@ -5,7 +5,7 @@ Display: one summary table per quality dimension.
 Columns: Métrique | Élément | Label | Valeur
 Results accumulated in the project and persisted.
 """
-import sys, os
+import sys, os, html
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import streamlit as st
@@ -13,7 +13,6 @@ import pandas as pd
 from datetime import datetime
 from statistics import mean
 
-from ui.schema import SchemaExplorer
 from analysers import (
     DataCompletenessAnalyzer,
     DataConformityAnalyser,
@@ -22,6 +21,7 @@ from analysers import (
     DataAccuracyAnalyser,
 )
 from project_manager import Project, METRIC_TO_DIMENSION
+import experiment_jobs
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 QUALITY_CSS = """
@@ -40,18 +40,12 @@ QUALITY_CSS = """
   letter-spacing: .14em; text-transform: uppercase;
   color: var(--muted); margin: 8px 0 10px;
 }
-.db-pills { margin: 4px 0 16px; }
-.db-pill {
-  display: inline-block; padding: 4px 12px; border-radius: 20px;
-  font-family: 'DM Mono', monospace; font-size: .68rem;
-  letter-spacing: .06em; margin-right: 8px; margin-bottom: 6px;
-}
 .metric-hd {
   font-family: 'DM Mono', monospace; font-size: .72rem;
   letter-spacing: .08em; text-transform: uppercase; margin: 14px 0 8px;
 }
 .info-strip {
-  background: rgba(79,140,255,.06);
+  background: rgba(57,104,209,.06);
   border-left: 3px solid var(--accent);
   border-radius: 0 8px 8px 0;
   padding: 14px 18px;
@@ -73,11 +67,9 @@ QUALITY_CSS = """
 </style>
 """
 
-DB_COLORS = ["#4f8cff", "#00e5c0", "#ffd166", "#ff6b6b", "#b57bee", "#ff9f43"]
-
 DIMENSIONS = {
     "Completeness": {
-        "icon": "◫", "color": "#4f8cff",
+        "icon": "◫", "color": "#3968d1",
         "metrics": {
             "property_completeness": "Property Completeness",
             "edge_coverage":         "Edge Coverage",
@@ -85,7 +77,7 @@ DIMENSIONS = {
         },
     },
     "Conformity": {
-        "icon": "◎", "color": "#00e5c0",
+        "icon": "◎", "color": "#00a884",
         "metrics": {
             "property_conformity":    "Property Conformity",
             "conditional_conformity": "Conditional Property Conformity",
@@ -93,7 +85,7 @@ DIMENSIONS = {
         },
     },
     "Freshness": {
-        "icon": "◷", "color": "#ffd166",
+        "icon": "◷", "color": "#d99a2b",
         "metrics": {
             "type_age":         "Average Type Age",
             "property_age":     "Average Property Age",
@@ -101,7 +93,7 @@ DIMENSIONS = {
         },
     },
     "Uniqueness": {
-        "icon": "◈", "color": "#ff6b6b",
+        "icon": "◈", "color": "#e15a5a",
         "metrics": {
             "exact_duplicate_rate":   "Exact Duplicate Rate",
             "partial_duplicate_rate": "Partial Duplicate Rate",
@@ -109,7 +101,7 @@ DIMENSIONS = {
         },
     },
     "Accuracy": {
-        "icon": "◉", "color": "#b57bee",
+        "icon": "◉", "color": "#9b5de0",
         "metrics": {
             "property_accuracy": "Property Accuracy",
         },
@@ -118,25 +110,11 @@ DIMENSIONS = {
 
 
 # ── cached schema fetchers ────────────────────────────────────────────────────
-@st.cache_data(ttl=60, show_spinner=False)
-def _labels(uri, user, pwd, db):
-    s = SchemaExplorer(uri, user, pwd, db); r = s.get_node_labels(); s.close(); return r
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _rels(uri, user, pwd, db):
-    s = SchemaExplorer(uri, user, pwd, db); r = s.get_relationship_types(); s.close(); return r
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _node_props(uri, user, pwd, db, lbl):
-    s = SchemaExplorer(uri, user, pwd, db); r = s.get_node_properties(lbl); s.close(); return r
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _edge_props(uri, user, pwd, db, rel):
-    s = SchemaExplorer(uri, user, pwd, db); r = s.get_edge_properties(rel); s.close(); return r
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _rel_labels(uri, user, pwd, db, rel):
-    s = SchemaExplorer(uri, user, pwd, db); r = s.get_node_labels_for_rel(rel); s.close(); return r
+from ui.schema_cache import (
+    labels as _labels, rels as _rels, node_props as _node_props,
+    edge_props as _edge_props, rel_labels as _rel_labels, clear_schema_cache,
+    accuracy_props as _accuracy_props,
+)
 
 
 # ── value formatting ──────────────────────────────────────────────────────────
@@ -175,6 +153,15 @@ def _label_display(metric_id: str, params: dict) -> tuple[str, str]:
         label = params.get("label", "?")
         return "edge", label
     return et or "node", params.get("label", "?")
+
+
+def _property_display(params: dict) -> str:
+    """Property (or properties) a result was computed on, read from its saved params."""
+    if params.get("prop"):
+        return params["prop"]
+    if params.get("props"):
+        return ", ".join(params["props"])
+    return "—"
 
 
 # ── metric param forms ────────────────────────────────────────────────────────
@@ -262,8 +249,12 @@ def _metric_params(metric_id, uri, user, pwd, db, prefix):
         et    = st.selectbox("Element type", elem_types, key=f"{prefix}_et")
         label = st.selectbox("Node label" if et == "node" else "Relation type",
                              labels if et == "node" else rels, key=f"{prefix}_lbl")
-        props = _node_props(uri, user, pwd, db, label) if et == "node" else _edge_props(uri, user, pwd, db, label)
+        # Only numeric properties (numbers stored as strings included): on a
+        # date or a text, the deviation to a reference value is meaningless.
+        props = _accuracy_props(uri, user, pwd, db, et, label)
         prop  = st.selectbox("Numeric property", props, key=f"{prefix}_prop")
+        if label and not props:
+            st.caption(f"⚠ No numeric property on {label}.")
         ref   = st.number_input("Reference value", value=0.0, key=f"{prefix}_ref")
         return {"et": et, "label": label, "prop": prop, "ref": ref}
 
@@ -348,11 +339,16 @@ def _run_metric(metric_id, params, uri, user, pwd, db):
             a = DataAccuracyAnalyser(uri, user, pwd, db)
             v = a.property_accuracy(params["et"], params["label"],
                                     params["prop"], params["ref"])
-            a.close(); return v, "accuracy"
+            a.close()
+            if v is None:
+                raise ValueError(f"'{params['prop']}' has no numeric value on "
+                                 f"{params['label']}.")
+            return v, "accuracy"
 
+    # On error, the message is returned in place of the value (see Evaluate).
     except Exception as e:
-        return None, "error"
-    return None, "error"
+        return str(e), "error"
+    return f"unknown metric '{metric_id}'.", "error"
 
 
 # ── summary tables ────────────────────────────────────────────────────────────
@@ -361,12 +357,12 @@ def _score_color_hex(val_str: str) -> str:
     if "%" in val_str:
         try:
             v = float(val_str.replace("%", "")) / 100
-            if v >= 0.8: return "#00e5c0"
-            if v >= 0.5: return "#ffd166"
-            return "#ff6b6b"
+            if v >= 0.8: return "#00a884"
+            if v >= 0.5: return "#d99a2b"
+            return "#e15a5a"
         except Exception:
             pass
-    return "#e8eaf0"
+    return "#191c26"
 
 
 def _render_dimension_table(dim_name: str, dim_info: dict, entries: list, last_key: str | None = None):
@@ -392,12 +388,13 @@ def _render_dimension_table(dim_name: str, dim_info: dict, entries: list, last_k
 
     # Build HTML table for full formatting control (bold on latest row)
     th_style = ("font-family:'DM Mono',monospace;font-size:.68rem;letter-spacing:.1em;"
-                "text-transform:uppercase;color:#5a6480;padding:6px 12px;"
-                "border-bottom:1px solid #1c2333;text-align:left;")
-    td_style = ("font-family:'DM Mono',monospace;font-size:.78rem;color:#e8eaf0;"
-                "padding:6px 12px;border-bottom:1px solid #0e1320;")
+                "text-transform:uppercase;color:#6b7085;padding:6px 12px;"
+                "border-bottom:1px solid #e1e4ea;text-align:left;")
+    td_style = ("font-family:'DM Mono',monospace;font-size:.78rem;color:#191c26;"
+                "padding:6px 12px;border-bottom:1px solid #f4f5f8;")
 
-    headers = ["Metric", "Element", "Label", "Value", "DB", "Computed"]
+    # No DB column: the tables only show the results of the selected database.
+    headers = ["Metric", "Element", "Label", "Property", "Value", "Computed"]
     thead = "".join(f'<th style="{th_style}">{h}</th>' for h in headers)
 
     rows_html = ""
@@ -405,7 +402,7 @@ def _render_dimension_table(dim_name: str, dim_info: dict, entries: list, last_k
         is_latest  = (last_key is not None) and (e.get("_key") == last_key)
         value_str  = _format_value(e.get("value"), e.get("display_type", "score"))
         val_color  = _score_color_hex(value_str)
-        row_bg     = "background:rgba(79,140,255,0.07);" if is_latest else ""
+        row_bg     = "background:rgba(57,104,209,0.07);" if is_latest else ""
         bold       = "font-weight:700;" if is_latest else ""
         marker     = "▶ " if is_latest else ""
         computed   = (e.get("computed_at", "")[:16].replace("T", " ")
@@ -413,17 +410,17 @@ def _render_dimension_table(dim_name: str, dim_info: dict, entries: list, last_k
 
         cells = [
             f'<td style="{td_style}{bold}">{marker}{e.get("metric_name","")}</td>',
-            f'<td style="{td_style}{bold}color:#5a6480">{e.get("element_type","")}</td>',
+            f'<td style="{td_style}{bold}color:#6b7085">{e.get("element_type","")}</td>',
             f'<td style="{td_style}{bold}">{e.get("label_display","")}</td>',
+            f'<td style="{td_style}{bold}">{html.escape(_property_display(e.get("params") or {}))}</td>',
             f'<td style="{td_style}{bold}color:{val_color}">{value_str}</td>',
-            f'<td style="{td_style}{bold}color:#5a6480">{e.get("db","")}</td>',
-            f'<td style="{td_style}{bold}color:#5a6480;font-size:.65rem">{computed}</td>',
+            f'<td style="{td_style}{bold}color:#6b7085;font-size:.65rem">{computed}</td>',
         ]
         rows_html += f'<tr style="{row_bg}">{"".join(cells)}</tr>'
 
     table_html = f"""
-    <div style="overflow-x:auto;border:1px solid #1c2333;border-radius:10px;
-                margin-bottom:8px;background:#0c1018">
+    <div style="overflow-x:auto;border:1px solid #e1e4ea;border-radius:10px;
+                margin-bottom:8px;background:#f4f5f8">
       <table style="width:100%;border-collapse:collapse">
         <thead><tr>{thead}</tr></thead>
         <tbody>{rows_html}</tbody>
@@ -449,112 +446,114 @@ def render_quality_tab():
                 unsafe_allow_html=True)
 
     # ── Database selector ──
-    st.markdown('<div class="sec-hd">⬢  Databases</div>', unsafe_allow_html=True)
-    selected_dbs = st.multiselect(
-        "Select databases", options=dbs,
-        default=[dbs[0]] if dbs else [],
-        key="q_dbs", label_visibility="collapsed",
-    )
-    if not selected_dbs:
-        st.markdown('<div class="info-strip">Select at least one database.</div>',
+    st.markdown('<div class="sec-hd">⬢  Database</div>', unsafe_allow_html=True)
+    db = st.selectbox("Database", options=dbs, key="q_db",
+                      label_visibility="collapsed")
+    if not db:
+        st.markdown('<div class="info-strip">No database available.</div>',
                     unsafe_allow_html=True)
         return
 
-    pills = []
-    for i, db in enumerate(selected_dbs):
-        c   = DB_COLORS[i % len(DB_COLORS)]
-        rgb = ",".join(str(int(c.lstrip("#")[j:j+2], 16)) for j in (0, 2, 4))
-        pills.append(
-            f'<span class="db-pill" style="background:rgba({rgb},.12);'
-            f'border:1px solid {c}40;color:{c}">● {db}</span>'
-        )
-    st.markdown(f'<div class="db-pills">{"".join(pills)}</div>', unsafe_allow_html=True)
+    if not _labels(uri, user, pwd, db):
+        st.warning(f"No node label found in **{db}**: the database is empty, or "
+                   "its schema was read before the data were imported "
+                   "(click ↻ Refresh schema).")
 
-    # ── Two-column layout ──
-    ratio = st.slider("⇔ Layout (config ↔ results)", 30, 70, 40, 5, key="q_ratio")
-    col_cfg, col_res = st.columns([ratio, 100 - ratio], gap="medium")
-
-    ref_db = selected_dbs[0]
+    # ── Two-column layout: config 40 %, results 60 % ──
+    col_cfg, col_res = st.columns([40, 60], gap="medium")
 
     # ── LEFT: metric config & evaluate buttons ──
     with col_cfg:
         st.markdown('<div class="sec-hd">⬢  Dimensions &amp; Metrics</div>',
                     unsafe_allow_html=True)
 
-        for dim_name, dim_info in DIMENSIONS.items():
-            color = dim_info["color"]
-            with st.expander(
-                f"{dim_info['icon']}  {dim_name}  ·  {len(dim_info['metrics'])} metrics",
-                expanded=False,
-            ):
-                for metric_id, metric_label in dim_info["metrics"].items():
-                    st.markdown(
-                        f'<div class="metric-hd" style="color:{color}">→ {metric_label}</div>',
-                        unsafe_allow_html=True,
-                    )
-                    params = _metric_params(
-                        metric_id, uri, user, pwd, ref_db,
-                        prefix=f"q_{metric_id}",
-                    )
+        # Only the selected metric's form is built: each form queries the
+        # schema, so building all 13 on every rerun made the page slow.
+        dim_name = st.selectbox(
+            "Dimension", list(DIMENSIONS.keys()), key="q_dim",
+            format_func=lambda d: f"{DIMENSIONS[d]['icon']}  {d}",
+        )
+        dim_info = DIMENSIONS[dim_name]
+        color    = dim_info["color"]
+        metric_id = st.selectbox(
+            "Metric", list(dim_info["metrics"].keys()), key=f"q_metric_{dim_name}",
+            format_func=lambda m: dim_info["metrics"][m],
+        )
+        metric_label = dim_info["metrics"][metric_id]
 
-                    if st.button(f"▶  Evaluate", key=f"run_{metric_id}", width="stretch"):
-                        with st.spinner(f"Computing {metric_label}..."):
-                            for db in selected_dbs:
-                                value, display_type = _run_metric(
-                                    metric_id, params, uri, user, pwd, db
-                                )
-                                if display_type == "error":
-                                    st.error(f"Error on {db}")
-                                    continue
+        st.markdown(
+            f'<div class="metric-hd" style="color:{color}">→ {metric_label}</div>',
+            unsafe_allow_html=True,
+        )
+        params = _metric_params(
+            metric_id, uri, user, pwd, db,
+            prefix=f"q_{metric_id}",
+        )
 
-                                elem_type, label_disp = _label_display(metric_id, params)
+        # A running Graph ML experiment degrades its database: measuring it now
+        # would save the quality of the degraded graph.
+        busy = experiment_jobs.busy_db(uri, db) is not None
+        if busy:
+            st.warning(f"⏳ A Graph ML experiment is degrading {db}: choose another "
+                       "database, or wait until the experiment finishes.")
 
-                                entry = {
-                                    "metric_id":    metric_id,
-                                    "metric_name":  metric_label,
-                                    "dimension":    METRIC_TO_DIMENSION.get(metric_id, "Other"),
-                                    "db":           db,
-                                    "element_type": elem_type,
-                                    "label_display": label_disp,
-                                    "value":        value,
-                                    "display_type": display_type,
-                                    "params":       params,
-                                }
-                                proj.upsert_quality_result(entry)
-                                # Track last computed for highlighting
-                                import hashlib, json as _json
-                                _key = hashlib.md5(
-                                    (metric_id + db + _json.dumps(params, sort_keys=True)).encode()
-                                ).hexdigest()
-                                st.session_state.q_last_key = _key
+        if st.button(f"▶  Evaluate", key=f"run_{metric_id}", width="stretch",
+                     disabled=busy):
+            # An empty menu (no label, no property...) gives None: nothing to compute.
+            empty = [k for k in ("label", "prop", "rel", "src", "dst")
+                     if k in params and not params[k]]
+            if empty or ("props" in params and not params["props"]):
+                st.error("Select a value in every menu before evaluating "
+                         f"({', '.join(empty) or 'properties'} is empty).")
+                st.stop()
+            with st.spinner(f"Computing {metric_label}..."):
+                value, display_type = _run_metric(
+                    metric_id, params, uri, user, pwd, db
+                )
+            if display_type == "error":
+                st.error(f"Error on {db}: {value}")
+                st.stop()
 
-                        st.success(f"{metric_label} computed and saved.")
-                        st.rerun()
+            elem_type, label_disp = _label_display(metric_id, params)
+            entry = {
+                "metric_id":    metric_id,
+                "metric_name":  metric_label,
+                "dimension":    METRIC_TO_DIMENSION.get(metric_id, "Other"),
+                "db":           db,
+                "element_type": elem_type,
+                "label_display": label_disp,
+                "value":        value,
+                "display_type": display_type,
+                "params":       params,
+            }
+            proj.upsert_quality_result(entry)
+            # Track last computed for highlighting
+            st.session_state.q_last_key = entry["_key"]
 
-                    st.markdown(
-                        "<hr style='border-color:#1c2333;margin:10px 0 4px'>",
-                        unsafe_allow_html=True,
-                    )
+            st.success(f"{metric_label} computed and saved.")
+            st.rerun()
+
+        st.markdown(
+            "<hr style='border-color:#e1e4ea;margin:10px 0 4px'>",
+            unsafe_allow_html=True,
+        )
+        if st.button("↻  Refresh schema", key="q_refresh_schema", width="stretch"):
+            clear_schema_cache()
+            st.rerun()
 
     # ── RIGHT: summary tables per dimension ──
     with col_res:
-        st.markdown('<div class="sec-hd">⬢  Results by dimension</div>',
-                    unsafe_allow_html=True)
+        st.markdown(f'<div class="sec-hd">⬢  Results by dimension — '
+                    f'{html.escape(db)}</div>', unsafe_allow_html=True)
 
-        results_by_dim = proj.results_by_dimension()
+        # Only the results computed on the selected database.
+        results_by_dim = proj.results_by_dimension(db=db)
         last_key = st.session_state.get("q_last_key")
 
-        # Button to clear all results
-        if proj.quality_results:
-            if st.button("🗑  Clear all results", key="clear_q"):
-                proj.clear_quality_results()
-                st.session_state.pop("q_last_key", None)
-                st.rerun()
-
-        if not proj.quality_results:
-            st.markdown("""
+        if not results_by_dim:
+            st.markdown(f"""
             <div class="info-strip">
-              No results in this project yet.<br>
+              No results for <strong>{html.escape(db)}</strong> yet.<br>
               Select a metric on the left and click
               <strong>▶ Evaluate</strong>.
             </div>""", unsafe_allow_html=True)
@@ -564,3 +563,9 @@ def render_quality_tab():
         for dim_name, dim_info in DIMENSIONS.items():
             entries = results_by_dim.get(dim_name, [])
             _render_dimension_table(dim_name, dim_info, entries, last_key=last_key)
+
+        # Clears the results of the selected database only
+        if st.button(f"🗑  Clear results of {db}", key="clear_q"):
+            proj.clear_quality_results(db=db)
+            st.session_state.pop("q_last_key", None)
+            st.rerun()
